@@ -46,7 +46,7 @@ def select_dropdown_option(driver, wait, dropdown_trigger_xpath, target_text, op
         trigger = wait.until(EC.element_to_be_clickable((By.XPATH, dropdown_trigger_xpath)))
         driver.execute_script("arguments[0].click();", trigger)
         print(f"{item_type} 드롭다운 클릭 성공.")
-        time.sleep(1)
+        time.sleep(0.3)
     except TimeoutException:
         print(f"오류: {item_type} 드롭다운({dropdown_trigger_xpath})을 시간 내에 찾거나 클릭할 수 없습니다.")
         return False
@@ -89,7 +89,7 @@ def select_dropdown_option(driver, wait, dropdown_trigger_xpath, target_text, op
                             driver.execute_script("arguments[0].click();", option_li)
                             print(f"  >> '{target_text}' {item_type} 선택 성공.")
                             clicked = True
-                            time.sleep(2.5)
+                            time.sleep(0.5)
                             break # 성공했으므로 루프 탈출
 
                         except StaleElementReferenceException:
@@ -136,9 +136,9 @@ def select_dropdown_option(driver, wait, dropdown_trigger_xpath, target_text, op
         print(f"{item_type} 선택 중 오류: {e}")
         return False
 
-# --- 2. Selenium을 이용한 스크래핑 함수 (Helper 함수 및 XPath 수정) ---
+# --- 2. Selenium을 이용한 스크래핑 함수 (전체 레코드 추출 및 URL 수정) ---
 def scrape_player_stats(player_list, base_url):
-    """Selenium을 사용하여 선수별 연도별 기록 스크래핑 (<li> 구조, span 데이터 추출)"""
+    """Selenium을 사용하여 선수별 전체 기록 섹션 스크래핑 및 URL 조정"""
 
     all_player_data = {}
 
@@ -167,11 +167,12 @@ def scrape_player_stats(player_list, base_url):
     # 제공된 HTML 구조 기반: class 'abs_select'와 'on'을 모두 가진 div 내부의 ul 아래 li
     options_li_xpath = "//div[contains(@class, 'abs_select') and contains(@class, 'on')]//ul/li"
 
+    # 전체 기록 Section을 찾는 XPath
+    record_container_xpath = '//*[@id="Record"]/div[2]/div/div'
 
     for player in player_list:
-        print(f"\n--- {player['name']} ({player['school']}, {player['position']}) 선수 데이터 스크래핑 시작 ---")
-        player_stats_df = pd.DataFrame()
-        player_stats = [] # List of dictionaries for each year's stats
+        print(f"\n--- {player['name']} ({player['school']}, {player['position']}) 선수 전체 기록 스크래핑 시작 ---")
+        record_html = "" # To store entire HTML content
 
         try:
             print(f"접속 시도: {base_url}")
@@ -190,138 +191,123 @@ def scrape_player_stats(player_list, base_url):
             if not select_dropdown_option(driver, wait, player_dropdown_trigger_xpath, player['name'], options_li_xpath, "선수"):
                 print(f"{player['name']} 선수 처리 중단 (선수 선택 실패).")
                 continue
+            # 3. 포지션 검색 버튼 클릭
+            print("검색 버튼 클릭 시도...")
+            position_search_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="recordForm"]/div/div[3]/div[1]/div[6]/a')))
+            driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true);", position_search_button)
+            time.sleep(0.5)
+            driver.execute_script("arguments[0].click();", position_search_button)
+            print("검색 버튼 클릭 성공.")
+            time.sleep(1)
 
-            # 3. 포지션 드롭다운 클릭
-            print("포지션 드롭다운 클릭 시도...")
+
+            # 4. 포지션에 따라 해당 항목 클릭
             try:
-                pos_trigger = wait.until(EC.element_to_be_clickable((By.XPATH, position_dropdown_trigger_xpath)))
-                driver.execute_script("arguments[0].click();", pos_trigger)
-                print("포지션 드롭다운 클릭 성공.")
-                time.sleep(1.5)
-            except Exception as e:
-                print(f"포지션 드롭다운 클릭 중 오류: {e}")
-                continue
+                if player['position'] == '타자':
+                    position_xpath = '//*[@id="recordForm"]/div/div[3]/div[2]/ul/li[1]/a'
+                elif player['position'] == '투수':
+                    position_xpath = '//*[@id="recordForm"]/div/div[3]/div[2]/ul/li[2]/a'
+                else:
+                    print(f"알 수 없는 포지션: {player['position']}. 처리 중단.")
+                    continue
 
-            # 4. 특정 포지션 선택 (타자/투수 - 이 부분은 구조가 다를 수 있으나, li[1]/li[2] 방식 유지)
-            if player['position'] == '타자':
-                # 포지션 선택 ul의 정확한 XPath 확인 필요. 일단 기존 XPath 사용
-                position_option_xpath = '//*[@id="recordForm"]/div/div[3]/div[2]/ul/li[1]'
-                pos_name = "타자"
-            elif player['position'] == '투수':
-                position_option_xpath = '//*[@id="recordForm"]/div/div[3]/div[2]/ul/li[2]'
-                pos_name = "투수"
-            else:
-                print(f"알 수 없는 포지션: {player['position']}")
-                continue
-
-                   
-
-
-            print(f"{pos_name} 포지션 선택 시도 (XPath: {position_option_xpath})...")
-            try:
-                # 포지션 옵션 리스트(ul)가 보이는지 먼저 확인하는 것이 더 안전할 수 있음
-                # wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="recordForm"]/div/div[3]/div[2]/ul')))
-                position_option_li = wait.until(EC.element_to_be_clickable((By.XPATH, position_option_xpath)))
-                driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true);", position_option_li)
+                print(f"포지션 '{player['position']}' 항목 클릭 시도 (XPath: {position_xpath})...")
+                position_element = wait.until(EC.element_to_be_clickable((By.XPATH, position_xpath)))
+                driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true);", position_element)
                 time.sleep(0.5)
-                driver.execute_script("arguments[0].click();", position_option_li)
-                print(f"{pos_name} 포지션 선택 성공.")
-                time.sleep(3) # ★★★ 데이터 테이블 로딩 대기 ★★★
+                driver.execute_script("arguments[0].click();", position_element)
+                print(f"포지션 '{player['position']}' 항목 클릭 성공.")
+                time.sleep(0.5)
             except TimeoutException:
-                 print(f"오류: {pos_name} 포지션 옵션({position_option_xpath})을 시간 내 찾거나 클릭할 수 없습니다.")
-                 continue
-            except Exception as e:
-                print(f"포지션 선택 중 오류: {e}")
+                print(f"오류: 포지션 항목({position_xpath})을 시간 내에 클릭할 수 없습니다.")
                 continue
-
-            # 5. 데이터 테이블 내용 가져오기 (profile_view > ul > li 구조 파싱)
-            print("데이터 테이블 내용 추출 시도...")
-            profile_view_xpath = '//div[@class="profile_view"]' # 상위 div
-            try:
-                profile_div = wait.until(EC.presence_of_element_located((By.XPATH, profile_view_xpath)))
-
-                # 헤더 추출
-                headers = []
-                header_row_xpath = profile_view_xpath + '//ul/li[@class="gray"]'
-                try:
-                   header_row = driver.find_element(By.XPATH, header_row_xpath)
-                   header_spans = header_row.find_elements(By.XPATH, ".//span[@class='sort']") # header_row 기준 상대경로
-                   headers = [span.text.strip() for span in header_spans]
-                   print(f"  헤더 추출 성공: {headers}")
-                except NoSuchElementException:
-                   print("경고: 헤더 행을 찾을 수 없습니다.")
-                   headers = [] # 헤더 없을 경우 빈 리스트 사용
-                except Exception as e:
-                    print(f"경고: 헤더 추출 중 오류 발생: {e}")
-                    headers = [] # 오류 발생시에도 빈 리스트
-
-                # 데이터 추출
-                data_rows_xpath = profile_view_xpath + '//ul/li[not(@class="gray")]'
-                data_rows = driver.find_elements(By.XPATH, data_rows_xpath)
-                print(f"  데이터 행 수: {len(data_rows)}")
-
-                for row in data_rows:
-                    try:
-                        stat_spans = row.find_elements(By.XPATH, ".//span[@class='result']") # 상대경로
-                        stat_values = [span.text.strip() for span in stat_spans]
-                        if len(stat_values) == len(headers):
-                            # 헤더와 값을 묶어 딕셔너리 생성
-                            year_stats = dict(zip(headers, stat_values))
-                            player_stats.append(year_stats) # 전체 선수 기록에 추가
-                            # print(f"    레코드: {year_stats}")
-                        else:
-                            print(f"  경고: 데이터 행의 열 수가 헤더와 일치하지 않습니다.")
-                    except StaleElementReferenceException:
-                        print("  경고: 데이터 행 처리 중 StaleElementReferenceException 발생.")
-                        continue
-                    except Exception as e:
-                        print(f"  경고: 데이터 행 처리 중 오류 발생: {e}")
-
-                print(f"{player['name']} 선수 데이터 추출 성공. (기록 수: {len(player_stats)})")
-
-            except NoSuchElementException:
-                print(f"오류: 선수 기록이 없습니다. (No profile_view div)")
-            except TimeoutException:
-                print(f"오류: 데이터 테이블({profile_view_xpath})이 시간 내에 로드되지 않았습니다.")
             except Exception as e:
-                print(f"데이터 추출 중 오류: {e}")
+                print(f"포지션 항목 클릭 중 오류: {e}")
+                continue
+            print(driver.current_url) # 현재 URL 출력 (디버깅용)
+
+            
+            # 6. 전체 기록 섹션 내용 가져오기 (포지션에 따라 XPath 변경)
+            if player['position'] == '타자':
+                record_xpath = "//*[@id='Record']/div[2]"
+            else:
+                record_xpath = "//*[@id='Record']/div[1]"
+
+            print(f"전체 기록 섹션 내용 추출 시도 (XPath: {record_xpath})...")
+            try:
+                record_container = wait.until(EC.presence_of_element_located((By.XPATH, record_xpath)))
+                record_html = record_container.get_attribute('outerHTML')  # HTML 전체 가져오기
+                print(f"  전체 기록 섹션 추출 성공 (길이: {len(record_html)} 문자).")
+            except NoSuchElementException:
+                print(f"오류: 기록 섹션 컨테이너({record_xpath})를 찾을 수 없습니다.")
+            except TimeoutException:
+                print(f"오류: 기록 섹션 컨테이너({record_xpath})가 시간 내에 로드되지 않았습니다.")
+            except Exception as e:
+                print(f"기록 섹션 추출 중 오류: {e}")
 
         except Exception as e:
             print(f"스크래핑 중 예기치 않은 오류 발생 ({player['name']}): {e}")
         finally:
-            # DataFrame 대신 player_stats (list of dicts) 사용
-             if player_stats:
-                 all_player_data[f"{player['name']}_{player['school']}"] = player_stats # DataFrame 대신 딕셔너리 리스트 저장
-             else:
-                 all_player_data[f"{player['name']}_{player['school']}"] = [{"정보": "데이터 없음 또는 추출 실패"}] # 실패 메시지 딕셔너리 저장
-                 print(f"{player['name']} 선수의 데이터를 찾지 못했거나 추출에 실패했습니다.")
+            # HTML 문자열 저장
+            if record_html:
+                all_player_data[f"{player['name']}_{player['school']}"] = record_html
+            else:
+                all_player_data[f"{player['name']}_{player['school']}"] = "<h1>데이터 없음 또는 추출 실패</h1>"  # 오류시 HTML 저장
+                print(f"{player['name']} 선수의 전체 기록을 찾지 못했거나 추출에 실패했습니다.")
+
+        # HTML 내용을 보기 좋은 표 형태로 변환
+        try:
+            soup = BeautifulSoup(record_html, 'html.parser')
+            profile_view = soup.find('div', class_='profile_view')
+            if profile_view:
+                rows = profile_view.find_all('li')
+                headers = [header.text.strip() for header in rows[0].find_all('span')]
+                data = [
+                    [value.text.strip() for value in row.find_all('span')]
+                    for row in rows[1:]
+                ]
+                df = pd.DataFrame(data, columns=headers)
+                print(f"\n{player['name']} 선수의 기록 (표 형태):")
+                print(df.to_string(index=False))  # 보기 좋게 출력
+            else:
+                print(f"{player['name']} 선수의 기록 섹션을 찾을 수 없습니다.")
+        except Exception as e:
+            print(f"{player['name']} 선수의 기록을 표 형태로 변환 중 오류 발생: {e}")
 
     print("\n모든 선수 스크래핑 완료. 브라우저 종료 중...")
     driver.quit()
     return all_player_data
 
-# --- 3. Excel 파일로 저장 (수정됨 - List of Dicts 처리) ---
+# --- 3. Excel 파일로 저장 (수정됨 - 보기 좋은 데이터 저장) ---
 def save_to_excel(data_dict, filename="kbo_player_stats_final.xlsx"):
-    """스크래핑된 데이터를 Excel 파일로 저장 (각 선수별 시트, 데이터는 List of Dicts)"""
+    """스크래핑된 데이터를 Excel 파일로 저장 (표 형태 데이터)"""
     if not data_dict:
         print("저장할 데이터가 없습니다.")
         return
 
     try:
         with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-            for sheet_name, player_data in data_dict.items(): # player_data is now List of Dictionaries
-                safe_sheet_name = re.sub(r'[\\/*?:\[\]]', '_', sheet_name)[:31] # 안전한 시트 이름
+            for sheet_name, html_content in data_dict.items():
+                safe_sheet_name = re.sub(r'[\\/*?:\[\]]', '_', sheet_name)[:31]
 
-                if isinstance(player_data, list) and player_data and isinstance(player_data[0], dict) and "정보" in player_data[0]:  # 데이터가 없고, "정보" 키가 있는 경우 (실패)
-                    pd.DataFrame(player_data).to_excel(writer, sheet_name=safe_sheet_name, index=False) # DataFrame으로 변환하여 저장
-                    print(f"'{safe_sheet_name}' 시트 생성 ({player_data[0]['정보']}).")
-                elif isinstance(player_data, list) and len(player_data) > 0: # List of Dictionaries (성공)
-                     df = pd.DataFrame(player_data)
-                     df.to_excel(writer, sheet_name=safe_sheet_name, index=False)
-                     print(f"'{safe_sheet_name}' 시트에 데이터 저장 완료 ({len(df)} 행).")
-                else: # 처리되지 않은 다른 형식
-                    pd.DataFrame([{"오류": "데이터 형식이 예상과 다릅니다."}]).to_excel(writer, sheet_name=safe_sheet_name, index=False) # 오류 표시
-                    print(f"'{safe_sheet_name}' 시트 생성 (데이터 형식 오류).")
+                # HTML 내용을 DataFrame으로 변환
+                try:
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    profile_view = soup.find('div', class_='profile_view')
+                    if profile_view:
+                        rows = profile_view.find_all('li')
+                        headers = [header.text.strip() for header in rows[0].find_all('span')]
+                        data = [
+                            [value.text.strip() for value in row.find_all('span')]
+                            for row in rows[1:]
+                        ]
+                        df = pd.DataFrame(data, columns=headers)
+                        df.to_excel(writer, sheet_name=safe_sheet_name, index=False)
+                        print(f"'{safe_sheet_name}' 시트에 데이터 저장 완료.")
+                    else:
+                        print(f"'{safe_sheet_name}' 시트에 저장할 데이터가 없습니다.")
+                except Exception as e:
+                    print(f"'{safe_sheet_name}' 시트 데이터 변환 중 오류 발생: {e}")
 
         print(f"\n데이터를 성공적으로 '{filename}' 파일에 저장했습니다.")
     except Exception as e:
@@ -335,8 +321,9 @@ if __name__ == "__main__":
     이재희 (대전고, 투수)
     나승엽 (덕수고, 내야수)
     김휘집 (신일고, 내야수)
-    """
+    """ # 테스트 데이터 (이름, 학교, 포지션)
 
+    #KBO 기본 URL (필터링 전)
     kbo_base_url = "https://www.korea-baseball.com/record/record/player_record?kind_cd=31&lig_idx=&group_no=&part_no=&record_type=1&begin_year=2020&end_year=2025&club_idx=&person_no=&group_part_idx="
     player_info_list = parse_player_input(input_player_data)
 
